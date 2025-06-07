@@ -1,0 +1,76 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  timeout: 30s
+
+database:
+  postgres:
+    host: "localhost"
+    port: 5433
+    database: "supply_chain_ml"
+    username: "postgres"
+    password: "password"
+    ssl_mode: "disable"
+    max_connections: 20
+
+  redis:
+    host: "localhost"
+    port: 6379
+    password: ""
+    db: 0
+    max_connections: 10
+
+  neo4j:
+    uri: "bolt://localhost:7687"
+    username: "neo4j"
+    password: "password"
+    max_connections: 10
+
+streaming:
+  kafka:
+    brokers: ["localhost:9092"]
+    consumer_group: "supply-chain-processor"
+    topics:
+      sec_filings: "sec-filings"
+      earnings_calls: "earnings-calls"
+      supplier_data: "supplier-data"
+      market_data: "market-data"
+      news_data: "news-data"
+
+  batch_size: 100
+  flush_interval: "5s"
+
+features:
+  cache_ttl: "24h"
+  max_features: 1000
+  feature_store_endpoint: "http://localhost:6379"
+
+ml:
+  model_server_endpoint: "http://localhost:8001"
+  model_version: "v1.0.0"
+  prediction_cache_ttl: "1h"
+  retrain_interval: "24h"
+
+monitoring:
+  prometheus:
+    endpoint: "localhost:9090"
+    scrape_interval: "15s"
+
+  logging:
+    level: "info"
+    format: "json"
+    output: "stdout"
+
+external_apis:
+  sec_edgar:
+    base_url: "https://www.sec.gov/Archives/edgar"
+    rate_limit: 10 # requests per second
+
+  financial_data:
+    alpha_vantage_key: "${ALPHA_VANTAGE_API_KEY}"
+    finnhub_key: "${FINNHUB_API_KEY}"
+
+  news_api:
+    newsapi_key: "${NEWS_API_KEY}"
+
+environment: "development"
