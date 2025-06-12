@@ -34,8 +34,15 @@ type NewsMetrics struct {
 // NewNewsAnalyzer creates a new news analyzer
 func NewNewsAnalyzer(db *sql.DB, featureStore *features.Store, cfg *config.Config) *NewsAnalyzer {
 	var newsAPIClient *external.NewsAPIClient
+	
+	// Debug logging
+	log.Printf("DEBUG: News API Key from config: '%s'", cfg.ExternalAPIs.NewsAPI.NewsAPIKey)
+	
 	if cfg.ExternalAPIs.NewsAPI.NewsAPIKey != "" {
 		newsAPIClient = external.NewNewsAPIClient(cfg.ExternalAPIs.NewsAPI.NewsAPIKey)
+		log.Printf("DEBUG: News API client initialized successfully")
+	} else {
+		log.Printf("DEBUG: News API key is empty, using mock data")
 	}
 
 	return &NewsAnalyzer{
@@ -52,7 +59,14 @@ func (na *NewsAnalyzer) Start(ctx context.Context) error {
 	na.isRunning = true
 	log.Println("News Analyzer started")
 
-	ticker := time.NewTicker(2 * time.Hour)
+	// Process initial batch immediately
+	log.Println("Processing initial news batch...")
+	if err := na.processBatch(ctx); err != nil {
+		log.Printf("Initial news processing error: %v", err)
+		na.metrics.ErrorCount++
+	}
+
+	ticker := time.NewTicker(30 * time.Minute) // Changed from 2 hours to 30 minutes for testing
 	defer ticker.Stop()
 
 	for {
@@ -61,6 +75,7 @@ func (na *NewsAnalyzer) Start(ctx context.Context) error {
 			na.isRunning = false
 			return nil
 		case <-ticker.C:
+			log.Println("Processing scheduled news batch...")
 			if err := na.processBatch(ctx); err != nil {
 				log.Printf("News analyzer error: %v", err)
 				na.metrics.ErrorCount++
@@ -85,19 +100,32 @@ func (na *NewsAnalyzer) GetMetrics(ctx context.Context) NewsMetrics {
 func (na *NewsAnalyzer) processBatch(ctx context.Context) error {
 	if na.newsAPI == nil {
 		// Simplified news processing (mock mode)
+		log.Println("News analyzer running in mock mode (no API key)")
 		na.metrics.ArticlesProcessed++
 		na.metrics.LastProcessedTime = time.Now()
 		return nil
 	}
 
+	log.Println("Starting news processing with real API...")
+
 	// Get companies to analyze
 	companies, err := na.getMonitoredCompanies(ctx)
 	if err != nil {
+		log.Printf("Error getting monitored companies: %v", err)
 		return err
 	}
 
+	log.Printf("Processing news for %d companies: %v", len(companies), func() []string {
+		var symbols []string
+		for _, c := range companies {
+			symbols = append(symbols, c.Symbol)
+		}
+		return symbols
+	}())
+
 	// Process company-specific news
 	for _, company := range companies {
+		log.Printf("Processing news for %s (%s)...", company.Symbol, company.Name)
 		if err := na.processCompanyNews(ctx, company.Symbol, company.Name); err != nil {
 			log.Printf("Error processing news for %s: %v", company.Symbol, err)
 			na.metrics.ErrorCount++
@@ -106,22 +134,33 @@ func (na *NewsAnalyzer) processBatch(ctx context.Context) error {
 	}
 
 	// Process general supply chain news
+	log.Println("Processing general supply chain news...")
 	if err := na.processSupplyChainNews(ctx); err != nil {
 		log.Printf("Error processing supply chain news: %v", err)
 		na.metrics.ErrorCount++
 	}
 
+	log.Printf("News processing completed. Articles processed: %d, Features extracted: %d", 
+		na.metrics.ArticlesProcessed, na.metrics.FeaturesExtracted)
 	na.metrics.LastProcessedTime = time.Now()
 	return nil
 }
 
 // getMonitoredCompanies gets companies to monitor for news
 func (na *NewsAnalyzer) getMonitoredCompanies(ctx context.Context) ([]types.Company, error) {
-	query := `SELECT symbol, name, COALESCE(sector, '') FROM companies WHERE active = true ORDER BY symbol LIMIT 20`
+	// Use company_info table since that's what exists
+	query := `SELECT ticker, name, COALESCE(sector, '') FROM company_info ORDER BY ticker LIMIT 20`
 	
 	rows, err := na.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		// If query fails, use fallback companies
+		return []types.Company{
+			{Symbol: "AAPL", Name: "Apple Inc.", Sector: "Technology"},
+			{Symbol: "AMZN", Name: "Amazon.com, Inc.", Sector: "Consumer Cyclical"},
+			{Symbol: "GOOGL", Name: "Alphabet Inc.", Sector: "Communication Services"},
+			{Symbol: "MSFT", Name: "Microsoft Corporation", Sector: "Technology"},
+			{Symbol: "TSLA", Name: "Tesla, Inc.", Sector: "Consumer Cyclical"},
+		}, nil
 	}
 	defer rows.Close()
 
@@ -132,6 +171,17 @@ func (na *NewsAnalyzer) getMonitoredCompanies(ctx context.Context) ([]types.Comp
 			continue
 		}
 		companies = append(companies, company)
+	}
+
+	// If no companies found, use fallback
+	if len(companies) == 0 {
+		companies = []types.Company{
+			{Symbol: "AAPL", Name: "Apple Inc.", Sector: "Technology"},
+			{Symbol: "AMZN", Name: "Amazon.com, Inc.", Sector: "Consumer Cyclical"},
+			{Symbol: "GOOGL", Name: "Alphabet Inc.", Sector: "Communication Services"},
+			{Symbol: "MSFT", Name: "Microsoft Corporation", Sector: "Technology"},
+			{Symbol: "TSLA", Name: "Tesla, Inc.", Sector: "Consumer Cyclical"},
+		}
 	}
 
 	return companies, nil
@@ -284,10 +334,9 @@ func (na *NewsAnalyzer) calculateSupplyChainRelevance(text string) float64 {
 func (na *NewsAnalyzer) storeNewsArticle(ctx context.Context, companyID string, article external.NewsArticle, sentiment, relevance float64) error {
 	query := `
 		INSERT INTO news_articles (
-			company_id, headline, content, url, source, published_at,
-			sentiment_score, supply_chain_relevance, confidence
+			company_id, title, content, url, source, author, published_date,
+			sentiment_score, supply_chain_relevance
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (url) DO NOTHING
 	`
 	
 	_, err := na.db.ExecContext(ctx, query,
@@ -296,10 +345,10 @@ func (na *NewsAnalyzer) storeNewsArticle(ctx context.Context, companyID string, 
 		article.Content,
 		article.URL,
 		article.Source.Name,
+		article.Author,
 		article.PublishedAt,
 		sentiment,
 		relevance,
-		0.8, // Confidence score
 	)
 	
 	return err

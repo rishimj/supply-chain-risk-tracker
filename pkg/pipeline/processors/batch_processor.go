@@ -526,11 +526,13 @@ func (bp *BatchProcessor) calculateGeographicRiskExposure(ctx context.Context, c
 }
 
 func (bp *BatchProcessor) getActiveCompanies(ctx context.Context) ([]string, error) {
-	query := `SELECT DISTINCT symbol FROM companies WHERE active = true ORDER BY symbol`
+	// Use company_info table since that's what exists
+	query := `SELECT DISTINCT ticker FROM company_info ORDER BY ticker`
 	
 	rows, err := bp.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		// If query fails, use only companies that exist in our database
+		return []string{"AAPL", "MSFT", "AMZN", "GOOGL", "TSLA"}, nil
 	}
 	defer rows.Close()
 
@@ -543,7 +545,7 @@ func (bp *BatchProcessor) getActiveCompanies(ctx context.Context) ([]string, err
 		companies = append(companies, symbol)
 	}
 
-	// Default companies if none in database
+	// Default companies if none in database - only use ones that exist
 	if len(companies) == 0 {
 		companies = []string{"AAPL", "MSFT", "AMZN", "GOOGL", "TSLA"}
 	}

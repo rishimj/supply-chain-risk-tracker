@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -173,7 +174,7 @@ func (av *AlphaVantageClient) GetDailyTimeSeries(ctx context.Context, symbol str
 		outputSize = "compact" // compact or full
 	}
 	
-	url := fmt.Sprintf("https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=%s&outputsize=%s&apikey=%s", symbol, outputSize, av.apiKey)
+	url := fmt.Sprintf("https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=%s&outputsize=%s&apikey=%s", symbol, outputSize, av.apiKey)
 	
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -186,8 +187,21 @@ func (av *AlphaVantageClient) GetDailyTimeSeries(ctx context.Context, symbol str
 	}
 	defer resp.Body.Close()
 	
+	// Read the response body for logging
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Log the first 500 characters of the response for debugging
+	responsePreview := string(bodyBytes)
+	if len(responsePreview) > 500 {
+		responsePreview = responsePreview[:500] + "..."
+	}
+	fmt.Printf("DEBUG: Alpha Vantage time series response for %s: %s\n", symbol, responsePreview)
+	
 	var timeSeries AlphaVantageTimeSeries
-	if err := json.NewDecoder(resp.Body).Decode(&timeSeries); err != nil {
+	if err := json.Unmarshal(bodyBytes, &timeSeries); err != nil {
 		return nil, err
 	}
 	
