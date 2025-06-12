@@ -1,0 +1,1 @@
+{"input_size": 10, "hidden_size": 256, "num_layers": 1, "dropout": 0.1349100473617527, "bidirectional": true, "batch_first": true}

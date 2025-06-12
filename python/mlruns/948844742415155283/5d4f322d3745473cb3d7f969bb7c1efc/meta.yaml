@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/rishimanimaran/Documents/Work/supply-chain-tracker/python/mlruns/948844742415155283/5d4f322d3745473cb3d7f969bb7c1efc/artifacts
+end_time: 1749753356310
+entry_point_name: ''
+experiment_id: '948844742415155283'
+lifecycle_stage: active
+run_id: 5d4f322d3745473cb3d7f969bb7c1efc
+run_name: gaudy-mole-476
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1749753356153
+status: 4
+tags: []
+user_id: rishimanimaran

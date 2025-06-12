@@ -1,0 +1,48 @@
+data:
+  database:
+    database: supply_chain_ml
+    host: localhost
+    password: password
+    port: 5433
+    username: postgres
+evaluation:
+  default_threshold: 0.5
+  metrics:
+  - auc
+  - precision
+  - recall
+  - f1_score
+features:
+  feature_selection_method: mutual_info
+  max_features: 50
+  scaler_type: robust
+mlflow:
+  experiment_name: supply_chain_risk_quick
+  model_registry_name: supply_chain_risk_model
+  tracking_uri: file:./mlruns
+models:
+  ensemble:
+    gnn:
+      dropout: 0.2
+      hidden_dim: 32
+      num_layers: 2
+    lstm:
+      dropout: 0.3
+      hidden_size: 64
+      num_layers: 2
+    weights:
+      gnn: 0.25
+      lstm: 0.35
+      xgboost: 0.4
+    xgboost:
+      learning_rate: 0.1
+      max_depth: 6
+      n_estimators: 100
+      random_state: 42
+training:
+  cv_folds: 3
+  n_trials: 10
+  optimization_metric: auc
+  test_ratio: 0.15
+  train_ratio: 0.7
+  val_ratio: 0.15

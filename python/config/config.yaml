@@ -1,0 +1,164 @@
+# ML Pipeline Configuration
+data:
+  database:
+    host: "localhost"
+    port: 5433
+    database: "supply_chain_ml"
+    username: "postgres"
+    password: "password"
+
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+
+  neo4j:
+    uri: "bolt://localhost:7687"
+    username: "neo4j"
+    password: "password"
+
+features:
+  # Feature engineering parameters
+  lookback_days: 90
+  min_data_points: 30
+
+  # Feature selection
+  max_features: 100
+  feature_selection_method: "mutual_info"
+
+  # Normalization
+  scaler_type: "robust" # robust, standard, minmax
+
+  # Feature categories
+  financial_features:
+    - "financial_inventory_turnover"
+    - "financial_gross_margin"
+    - "financial_debt_to_equity"
+    - "financial_current_ratio"
+    - "financial_roa"
+    - "financial_roe"
+    - "financial_quick_ratio"
+    - "financial_asset_turnover"
+
+  network_features:
+    - "network_supplier_concentration"
+    - "network_supplier_risk_score"
+    - "network_customer_concentration"
+    - "network_geographic_diversity"
+    - "network_tier1_suppliers"
+    - "network_critical_suppliers"
+
+  temporal_features:
+    - "ts_volatility_30d"
+    - "ts_momentum_10d"
+    - "ts_trend_strength"
+    - "ts_seasonality"
+    - "ts_autocorr_lag1"
+    - "ts_volatility_ratio"
+
+  nlp_features:
+    - "nlp_sentiment_score"
+    - "nlp_risk_keywords_count"
+    - "nlp_positive_sentiment"
+    - "nlp_negative_sentiment"
+    - "nlp_news_volume"
+
+models:
+  ensemble:
+    weights:
+      xgboost: 0.4
+      lstm: 0.35
+      gnn: 0.25
+
+    xgboost:
+      n_estimators: 500
+      max_depth: 6
+      learning_rate: 0.1
+      subsample: 0.8
+      colsample_bytree: 0.8
+      random_state: 42
+
+    lstm:
+      hidden_size: 128
+      num_layers: 2
+      dropout: 0.3
+      sequence_length: 30
+      batch_size: 32
+      epochs: 100
+      learning_rate: 0.001
+
+    gnn:
+      hidden_dim: 64
+      num_layers: 3
+      dropout: 0.2
+      aggregation: "mean"
+      batch_size: 16
+      epochs: 50
+      learning_rate: 0.01
+
+training:
+  # Data splitting
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+  # Time-based splitting
+  split_date: "2023-01-01"
+
+  # Cross-validation
+  cv_folds: 5
+  cv_method: "time_series"
+
+  # Early stopping
+  early_stopping_patience: 10
+  early_stopping_min_delta: 0.001
+
+  # Hyperparameter optimization
+  n_trials: 100
+  optimization_metric: "auc"
+
+  # Model selection
+  model_selection_metric: "f1_score"
+  threshold_optimization: true
+
+evaluation:
+  metrics:
+    - "auc"
+    - "precision"
+    - "recall"
+    - "f1_score"
+    - "accuracy"
+    - "log_loss"
+
+  # Threshold for binary classification
+  default_threshold: 0.5
+
+  # Performance monitoring
+  drift_detection: true
+  performance_degradation_threshold: 0.05
+
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "supply_chain_risk_prediction"
+  model_registry_name: "supply_chain_risk_model"
+
+deployment:
+  model_server:
+    host: "0.0.0.0"
+    port: 8001
+    workers: 4
+    timeout: 30
+
+  batch_prediction:
+    batch_size: 1000
+    max_concurrent_batches: 5
+
+  monitoring:
+    log_predictions: true
+    performance_monitoring: true
+    drift_monitoring: true
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/ml_pipeline.log"
