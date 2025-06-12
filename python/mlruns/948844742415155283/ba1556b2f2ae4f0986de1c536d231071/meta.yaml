@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/rishimanimaran/Documents/Work/supply-chain-tracker/python/mlruns/948844742415155283/ba1556b2f2ae4f0986de1c536d231071/artifacts
+end_time: 1749754295519
+entry_point_name: ''
+experiment_id: '948844742415155283'
+lifecycle_stage: active
+run_id: ba1556b2f2ae4f0986de1c536d231071
+run_name: final_model
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1749754254001
+status: 3
+tags: []
+user_id: rishimanimaran

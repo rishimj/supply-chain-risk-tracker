@@ -1,0 +1,1 @@
+{"input_size": 50, "hidden_size": 128, "num_layers": 2, "dropout": 0.3, "bidirectional": true, "batch_first": true}

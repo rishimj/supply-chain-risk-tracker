@@ -11,7 +11,7 @@ torch-geometric>=2.3.0
 transformers>=4.30.0
 sentence-transformers>=2.2.0
 
-# Feature Engineering & Hyperparameter Optimization
+# Feature Engineering & Hsyperparameter Optimization
 optuna>=3.2.0
 mlflow>=2.5.0
 pydantic>=2.0.0
