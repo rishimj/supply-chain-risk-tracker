@@ -3,9 +3,15 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"log"
+	"math"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"supply-chain-ml/pkg/features"
@@ -16,6 +22,55 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
 )
+
+// Stock price API configuration
+const (
+	ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query"
+	API_TIMEOUT = 10 * time.Second
+)
+
+var (
+	// API key from environment variable or default to demo
+	ALPHA_VANTAGE_API_KEY = getEnvOrDefault("ALPHA_VANTAGE_API_KEY", "demo")
+	// Enable/disable real API calls
+	ENABLE_REAL_STOCK_DATA = getEnvOrDefault("ENABLE_REAL_STOCK_DATA", "true") == "true"
+)
+
+// getEnvOrDefault gets environment variable or returns default value
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// Alpha Vantage API response structures
+type AlphaVantageQuote struct {
+	GlobalQuote struct {
+		Symbol           string `json:"01. symbol"`
+		Open             string `json:"02. open"`
+		High             string `json:"03. high"`
+		Low              string `json:"04. low"`
+		Price            string `json:"05. price"`
+		Volume           string `json:"06. volume"`
+		LatestTradingDay string `json:"07. latest trading day"`
+		PreviousClose    string `json:"08. previous close"`
+		Change           string `json:"09. change"`
+		ChangePercent    string `json:"10. change percent"`
+	} `json:"Global Quote"`
+}
+
+type StockData struct {
+	Symbol            string
+	Price             float64
+	Change            float64
+	ChangePercent     float64
+	PreviousClose     float64
+	Volume            int64
+	LatestTradingDay  string
+	IsRealData        bool
+	Error             string
+}
 
 // Handlers contains all HTTP handlers for the API
 type Handlers struct {
@@ -108,6 +163,13 @@ type BatchSummary struct {
 }
 
 // Health check endpoint
+// @Summary Health check
+// @Description Get the health status of the API
+// @Tags health
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{} "Health status"
+// @Router /health [get]
 func (h *Handlers) Health(c *gin.Context) {
 	ctx := c.Request.Context()
 	
@@ -121,7 +183,25 @@ func (h *Handlers) Health(c *gin.Context) {
 	c.JSON(status, healthStatus)
 }
 
+// Simple test endpoint
+func (h *Handlers) TestEndpoint(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"message": "test endpoint works",
+		"timestamp": time.Now(),
+	})
+}
+
 // PredictRisk handles single company risk prediction
+// @Summary Predict company risk
+// @Description Generate supply chain risk prediction for a company
+// @Tags predictions
+// @Accept json
+// @Produce json
+// @Param request body PredictRequest true "Prediction request"
+// @Success 200 {object} PredictResponse "Prediction result"
+// @Failure 400 {object} map[string]interface{} "Bad request"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /predictions/predict [post]
 func (h *Handlers) PredictRisk(c *gin.Context) {
 	startTime := time.Now()
 	ctx := c.Request.Context()
@@ -928,4 +1008,670 @@ func (h *Handlers) GetSectorAnalysis(c *gin.Context) {
 		"data":    sectors,
 		"success": true,
 	})
+}
+
+// GetDisruptionRisk handles disruption risk analysis requests
+// @Summary Get disruption risk analysis
+// @Description Get supply chain disruption risk analysis for one or more companies
+// @Tags disruption
+// @Accept json
+// @Produce json
+// @Param symbol query string true "Company symbol(s), comma-separated for multiple"
+// @Success 200 {object} map[string]interface{} "Single company risk data or array of company data"
+// @Failure 400 {object} map[string]interface{} "Bad request"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /disruption-risk [get]
+func (h *Handlers) GetDisruptionRisk(c *gin.Context) {
+	symbols := c.Query("symbol")
+	if symbols == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "symbol parameter is required",
+			"message": "Please provide at least one company symbol",
+		})
+		return
+	}
+
+	// Log the request for debugging
+	log.Printf("GetDisruptionRisk called with symbols: %s", symbols)
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Panic in GetDisruptionRisk: %v", r)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Internal server error",
+				"message": "An unexpected error occurred while processing the request",
+			})
+		}
+	}()
+
+	// For single symbol requests, return detailed data structure for DisruptionCard
+	if !strings.Contains(symbols, ",") {
+		riskData, err := generateSingleCompanyRiskData(symbols)
+		if err != nil {
+			log.Printf("Error generating single company risk data for %s: %v", symbols, err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to generate risk data",
+				"message": fmt.Sprintf("Could not generate risk data for symbol %s", symbols),
+			})
+			return
+		}
+		c.JSON(http.StatusOK, riskData)
+		return
+	}
+
+	// For multiple symbols, return array of company data for CompanyList
+	symbolList := splitSymbols(symbols)
+	if len(symbolList) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid symbols",
+			"message": "No valid symbols found in the request",
+		})
+		return
+	}
+
+	var companies []gin.H
+	var errors []string
+
+	// Batch fetch stock data for all symbols to reduce API calls
+	stockDataMap := batchFetchStockData(symbolList)
+
+	for _, symbol := range symbolList {
+		companyData, err := generateCompanyListDataWithStockData(symbol, stockDataMap[symbol])
+		if err != nil {
+			log.Printf("Error generating company data for %s: %v", symbol, err)
+			errors = append(errors, fmt.Sprintf("Failed to generate data for %s: %v", symbol, err))
+			continue
+		}
+		companies = append(companies, companyData)
+	}
+
+	// If we have some successful results, return them with warnings
+	if len(companies) > 0 {
+		response := gin.H{
+			"data": companies,
+		}
+		if len(errors) > 0 {
+			response["warnings"] = errors
+		}
+		c.JSON(http.StatusOK, companies) // Return just the array for frontend compatibility
+		return
+	}
+
+	// If no companies were processed successfully
+	c.JSON(http.StatusInternalServerError, gin.H{
+		"error": "Failed to process any symbols",
+		"message": "Could not generate data for any of the requested symbols",
+		"details": errors,
+	})
+}
+
+// Helper function to generate single company risk data for DisruptionCard
+func generateSingleCompanyRiskData(symbol string) (gin.H, error) {
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol cannot be empty")
+	}
+
+	// Validate symbol format (basic validation)
+	if len(symbol) > 10 || len(symbol) < 1 {
+		return nil, fmt.Errorf("invalid symbol format: %s", symbol)
+	}
+
+	// Generate mock risk data based on symbol
+	baseRisk, err := getBaseRiskForSymbol(symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get base risk for %s: %w", symbol, err)
+	}
+
+	// Generate historical data for chart (6 months)
+	chartData, err := generateHistoricalRiskData(symbol, baseRisk)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate historical data for %s: %w", symbol, err)
+	}
+
+	// Generate risk factors
+	factors, err := generateRiskFactors(symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate risk factors for %s: %w", symbol, err)
+	}
+
+	// Get trend data
+	trend, err := getTrendForSymbol(symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get trend for %s: %w", symbol, err)
+	}
+
+	return gin.H{
+		"currentRisk": baseRisk,
+		"trend":       trend,
+		"data":        chartData,
+		"factors":     factors,
+	}, nil
+}
+
+// Helper function to generate company data for CompanyList
+func generateCompanyListData(symbol string) (gin.H, error) {
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol cannot be empty")
+	}
+
+	baseRisk, err := getBaseRiskForSymbol(symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get base risk: %w", err)
+	}
+
+	companyInfo, err := getCompanyInfo(symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get company info: %w", err)
+	}
+
+	// Fetch real stock data with fallback to mock data
+	stockData := getStockDataWithFallback(symbol)
+
+	response := gin.H{
+		"name":                companyInfo["name"],
+		"symbol":              symbol,
+		"logo":                fmt.Sprintf("https://logo.clearbit.com/%s.com", getCompanyDomain(symbol)),
+		"stockPrice":          stockData.Price,
+		"priceChange":         stockData.Change,
+		"priceChangePercent":  stockData.ChangePercent,
+		"riskLevel":           baseRisk,
+		"riskTrend":           "stable",
+		"sector":              companyInfo["sector"],
+		"isRealData":          stockData.IsRealData,
+	}
+
+	// Add additional fields if we have real data
+	if stockData.IsRealData {
+		response["previousClose"] = stockData.PreviousClose
+		response["volume"] = stockData.Volume
+		response["latestTradingDay"] = stockData.LatestTradingDay
+	}
+
+	// Add error information if data fetch failed
+	if stockData.Error != "" {
+		response["dataSource"] = "mock"
+		response["apiError"] = stockData.Error
+	} else if stockData.IsRealData {
+		response["dataSource"] = "alpha_vantage"
+	} else {
+		response["dataSource"] = "mock"
+	}
+
+	return response, nil
+}
+
+// Helper function to generate historical risk data for charts
+func generateHistoricalRiskData(symbol string, baseRisk float64) ([]gin.H, error) {
+	if baseRisk < 0 || baseRisk > 100 {
+		return nil, fmt.Errorf("invalid base risk value: %f", baseRisk)
+	}
+
+	var chartData []gin.H
+	months := []string{"Aug", "Sep", "Oct", "Nov", "Dec", "Jan"}
+	
+	for i, month := range months {
+		// Add some realistic variation to the risk over time
+		variation := (float64(i)*1.5) + (float64(i%3)*2.5) - 3.0 // Range: -3 to +6
+		risk := baseRisk + variation
+		
+		// Ensure risk stays within reasonable bounds
+		if risk < 0 {
+			risk = 0
+		}
+		if risk > 100 {
+			risk = 100
+		}
+		
+		chartData = append(chartData, gin.H{
+			"date": month,
+			"risk": math.Round(risk*10)/10, // Round to 1 decimal place
+		})
+	}
+	
+	return chartData, nil
+}
+
+// Helper functions for data generation with error handling
+func getBaseRiskForSymbol(symbol string) (float64, error) {
+	if symbol == "" {
+		return 0, fmt.Errorf("symbol cannot be empty")
+	}
+
+	riskMap := map[string]float64{
+		"AAPL":  35.5,
+		"TSLA":  72.3,
+		"MSFT":  28.1,
+		"AMZN":  45.7,
+		"WMT":   22.8,
+		"GOOGL": 31.2,
+		"META":  48.9,
+		"NVDA":  67.4,
+		"NFLX":  41.2,
+		"CRM":   39.8,
+	}
+	
+	if risk, exists := riskMap[symbol]; exists {
+		return risk, nil
+	}
+	
+	// Generate a pseudo-random but consistent risk for unknown symbols
+	hash := 0
+	for _, char := range symbol {
+		hash = hash*31 + int(char)
+	}
+	risk := float64(20 + (hash%60)) // Range: 20-80%
+	return math.Round(risk*10)/10, nil
+}
+
+func getTrendForSymbol(symbol string) (float64, error) {
+	if symbol == "" {
+		return 0, fmt.Errorf("symbol cannot be empty")
+	}
+
+	trendMap := map[string]float64{
+		"AAPL":  2.3,
+		"TSLA":  -5.1,
+		"MSFT":  1.8,
+		"AMZN":  3.2,
+		"WMT":   -0.5,
+		"GOOGL": 1.1,
+		"META":  4.7,
+		"NVDA":  -2.8,
+		"NFLX":  -1.2,
+		"CRM":   2.1,
+	}
+	
+	if trend, exists := trendMap[symbol]; exists {
+		return trend, nil
+	}
+	
+	// Generate a pseudo-random but consistent trend for unknown symbols
+	hash := 0
+	for _, char := range symbol {
+		hash = hash*31 + int(char)
+	}
+	trend := float64(-5 + (hash%11)) // Range: -5 to +5
+	return math.Round(trend*10)/10, nil
+}
+
+func generateRiskFactors(symbol string) ([]gin.H, error) {
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol cannot be empty")
+	}
+
+	allFactors := []gin.H{
+		{"name": "Supply Chain Concentration", "level": "High"},
+		{"name": "Geopolitical Risk", "level": "Medium"},
+		{"name": "Supplier Financial Health", "level": "Low"},
+		{"name": "Transportation Disruption", "level": "Medium"},
+		{"name": "Raw Material Availability", "level": "High"},
+		{"name": "Regulatory Compliance", "level": "Low"},
+		{"name": "Cyber Security Risk", "level": "Medium"},
+		{"name": "Climate Change Impact", "level": "High"},
+		{"name": "Labor Availability", "level": "Medium"},
+		{"name": "Currency Fluctuation", "level": "Low"},
+	}
+	
+	// Return 3-6 factors based on symbol to provide variety
+	hash := 0
+	for _, char := range symbol {
+		hash = hash*31 + int(char)
+	}
+	factorCount := 3 + (hash % 4) // 3-6 factors
+	
+	if factorCount > len(allFactors) {
+		factorCount = len(allFactors)
+	}
+	
+	// Use hash to determine which factors to include for consistency
+	selectedFactors := make([]gin.H, factorCount)
+	for i := 0; i < factorCount; i++ {
+		selectedFactors[i] = allFactors[(hash+i)%len(allFactors)]
+	}
+	
+	return selectedFactors, nil
+}
+
+func getCompanyInfo(symbol string) (map[string]string, error) {
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol cannot be empty")
+	}
+
+	companyMap := map[string]map[string]string{
+		"AAPL":  {"name": "Apple Inc.", "sector": "Technology"},
+		"TSLA":  {"name": "Tesla Inc.", "sector": "Automotive"},
+		"MSFT":  {"name": "Microsoft Corp.", "sector": "Technology"},
+		"AMZN":  {"name": "Amazon.com Inc.", "sector": "E-commerce"},
+		"WMT":   {"name": "Walmart Inc.", "sector": "Retail"},
+		"GOOGL": {"name": "Alphabet Inc.", "sector": "Technology"},
+		"META":  {"name": "Meta Platforms Inc.", "sector": "Technology"},
+		"NVDA":  {"name": "NVIDIA Corp.", "sector": "Technology"},
+		"NFLX":  {"name": "Netflix Inc.", "sector": "Entertainment"},
+		"CRM":   {"name": "Salesforce Inc.", "sector": "Technology"},
+	}
+	
+	if info, exists := companyMap[symbol]; exists {
+		return info, nil
+	}
+	
+	// Generate default info for unknown symbols
+	return map[string]string{
+		"name":   symbol + " Corp.",
+		"sector": "Unknown",
+	}, nil
+}
+
+func getCompanyDomain(symbol string) string {
+	domainMap := map[string]string{
+		"AAPL":  "apple",
+		"TSLA":  "tesla",
+		"MSFT":  "microsoft",
+		"AMZN":  "amazon",
+		"WMT":   "walmart",
+		"GOOGL": "google",
+		"META":  "meta",
+		"NVDA":  "nvidia",
+		"NFLX":  "netflix",
+		"CRM":   "salesforce",
+	}
+	
+	if domain, exists := domainMap[symbol]; exists {
+		return domain
+	}
+	return "example"
+}
+
+// fetchRealStockData fetches real stock data from Alpha Vantage API
+func fetchRealStockData(symbol string) (*StockData, error) {
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol cannot be empty")
+	}
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: API_TIMEOUT,
+	}
+
+	// Build API URL
+	url := fmt.Sprintf("%s?function=GLOBAL_QUOTE&symbol=%s&apikey=%s", 
+		ALPHA_VANTAGE_BASE_URL, symbol, ALPHA_VANTAGE_API_KEY)
+
+	log.Printf("Fetching stock data for %s from Alpha Vantage", symbol)
+
+	// Make HTTP request
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make API request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
+	}
+
+	// Parse JSON response
+	var quote AlphaVantageQuote
+	if err := json.NewDecoder(resp.Body).Decode(&quote); err != nil {
+		return nil, fmt.Errorf("failed to parse API response: %w", err)
+	}
+
+	// Check if we got valid data
+	if quote.GlobalQuote.Symbol == "" || quote.GlobalQuote.Price == "" {
+		return nil, fmt.Errorf("no data returned for symbol %s", symbol)
+	}
+
+	// Parse numeric values
+	price, err := strconv.ParseFloat(quote.GlobalQuote.Price, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse price: %w", err)
+	}
+
+	change, err := strconv.ParseFloat(quote.GlobalQuote.Change, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse change: %w", err)
+	}
+
+	// Parse change percent (remove % sign)
+	changePercentStr := strings.TrimSuffix(quote.GlobalQuote.ChangePercent, "%")
+	changePercent, err := strconv.ParseFloat(changePercentStr, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse change percent: %w", err)
+	}
+
+	previousClose, err := strconv.ParseFloat(quote.GlobalQuote.PreviousClose, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse previous close: %w", err)
+	}
+
+	volume, err := strconv.ParseInt(quote.GlobalQuote.Volume, 10, 64)
+	if err != nil {
+		log.Printf("Warning: failed to parse volume for %s: %v", symbol, err)
+		volume = 0 // Set to 0 if parsing fails
+	}
+
+	return &StockData{
+		Symbol:            quote.GlobalQuote.Symbol,
+		Price:             math.Round(price*100)/100,
+		Change:            math.Round(change*100)/100,
+		ChangePercent:     math.Round(changePercent*100)/100,
+		PreviousClose:     math.Round(previousClose*100)/100,
+		Volume:            volume,
+		LatestTradingDay:  quote.GlobalQuote.LatestTradingDay,
+		IsRealData:        true,
+	}, nil
+}
+
+// getStockDataWithFallback tries to fetch real data, falls back to mock data if API fails
+func getStockDataWithFallback(symbol string) *StockData {
+	// Check if real API calls are enabled
+	if !ENABLE_REAL_STOCK_DATA {
+		log.Printf("Real stock data disabled, using mock data for %s", symbol)
+		mockPrice, _ := generateMockStockPrice(symbol)
+		mockChange, _ := generateMockPriceChange()
+		mockChangePercent, _ := generateMockPriceChangePercent()
+		
+		return &StockData{
+			Symbol:        symbol,
+			Price:         mockPrice,
+			Change:        mockChange,
+			ChangePercent: mockChangePercent,
+			PreviousClose: mockPrice - mockChange,
+			Volume:        0,
+			IsRealData:    false,
+			Error:         "Real stock data disabled",
+		}
+	}
+
+	// Try to fetch real data first
+	realData, err := fetchRealStockData(symbol)
+	if err != nil {
+		log.Printf("Failed to fetch real stock data for %s: %v, using mock data", symbol, err)
+		
+		// Fall back to mock data
+		mockPrice, _ := generateMockStockPrice(symbol)
+		mockChange, _ := generateMockPriceChange()
+		mockChangePercent, _ := generateMockPriceChangePercent()
+		
+		return &StockData{
+			Symbol:        symbol,
+			Price:         mockPrice,
+			Change:        mockChange,
+			ChangePercent: mockChangePercent,
+			PreviousClose: mockPrice - mockChange,
+			Volume:        0,
+			IsRealData:    false,
+			Error:         err.Error(),
+		}
+	}
+
+	log.Printf("Successfully fetched real stock data for %s: $%.2f (%.2f%%)", 
+		symbol, realData.Price, realData.ChangePercent)
+	return realData
+}
+
+// batchFetchStockData fetches stock data for multiple symbols
+func batchFetchStockData(symbols []string) map[string]*StockData {
+	stockDataMap := make(map[string]*StockData)
+	
+	// Use goroutines to fetch data concurrently (but limit concurrency to avoid rate limits)
+	const maxConcurrency = 5
+	semaphore := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	
+	for _, symbol := range symbols {
+		wg.Add(1)
+		go func(sym string) {
+			defer wg.Done()
+			semaphore <- struct{}{} // Acquire semaphore
+			defer func() { <-semaphore }() // Release semaphore
+			
+			stockData := getStockDataWithFallback(sym)
+			
+			mu.Lock()
+			stockDataMap[sym] = stockData
+			mu.Unlock()
+		}(symbol)
+	}
+	
+	wg.Wait()
+	return stockDataMap
+}
+
+// generateCompanyListDataWithStockData generates company data using pre-fetched stock data
+func generateCompanyListDataWithStockData(symbol string, stockData *StockData) (gin.H, error) {
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol cannot be empty")
+	}
+
+	baseRisk, err := getBaseRiskForSymbol(symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get base risk: %w", err)
+	}
+
+	companyInfo, err := getCompanyInfo(symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get company info: %w", err)
+	}
+
+	// Use provided stock data or fetch it if not provided
+	if stockData == nil {
+		stockData = getStockDataWithFallback(symbol)
+	}
+
+	response := gin.H{
+		"name":                companyInfo["name"],
+		"symbol":              symbol,
+		"logo":                fmt.Sprintf("https://logo.clearbit.com/%s.com", getCompanyDomain(symbol)),
+		"stockPrice":          stockData.Price,
+		"priceChange":         stockData.Change,
+		"priceChangePercent":  stockData.ChangePercent,
+		"riskLevel":           baseRisk,
+		"riskTrend":           "stable",
+		"sector":              companyInfo["sector"],
+		"isRealData":          stockData.IsRealData,
+	}
+
+	// Add additional fields if we have real data
+	if stockData.IsRealData {
+		response["previousClose"] = stockData.PreviousClose
+		response["volume"] = stockData.Volume
+		response["latestTradingDay"] = stockData.LatestTradingDay
+	}
+
+	// Add error information if data fetch failed
+	if stockData.Error != "" {
+		response["dataSource"] = "mock"
+		response["apiError"] = stockData.Error
+	} else if stockData.IsRealData {
+		response["dataSource"] = "alpha_vantage"
+	} else {
+		response["dataSource"] = "mock"
+	}
+
+	return response, nil
+}
+
+func generateMockStockPrice(symbol string) (float64, error) {
+	if symbol == "" {
+		return 0, fmt.Errorf("symbol cannot be empty")
+	}
+
+	basePrices := map[string]float64{
+		"AAPL":  175.50,
+		"TSLA":  245.80,
+		"MSFT":  378.25,
+		"AMZN":  145.90,
+		"WMT":   165.75,
+		"GOOGL": 142.30,
+		"META":  485.60,
+		"NVDA":  875.25,
+		"NFLX":  425.30,
+		"CRM":   215.40,
+	}
+	
+	if price, exists := basePrices[symbol]; exists {
+		return price, nil
+	}
+	
+	// Generate a pseudo-random but consistent price for unknown symbols
+	hash := 0
+	for _, char := range symbol {
+		hash = hash*31 + int(char)
+	}
+	price := float64(50 + (hash%500)) // Range: $50-$550
+	return math.Round(price*100)/100, nil
+}
+
+func generateMockPriceChange() (float64, error) {
+	// Generate a time-based pseudo-random price change for consistency during the same day
+	now := time.Now()
+	seed := now.Year()*10000 + int(now.YearDay())*100 + now.Hour()
+	
+	// Generate change between -15 and +15
+	change := float64(-15 + (seed%31))
+	return math.Round(change*100)/100, nil
+}
+
+func generateMockPriceChangePercent() (float64, error) {
+	// Generate a time-based pseudo-random percentage change
+	now := time.Now()
+	seed := now.Year()*10000 + int(now.YearDay())*100 + now.Hour() + 1 // +1 to differentiate from price change
+	
+	// Generate percentage change between -8% and +8%
+	changePercent := float64(-8 + (seed%17))
+	return math.Round(changePercent*100)/100, nil
+}
+
+// Legacy functions for backward compatibility
+func generateStockPrice(symbol string) (float64, error) {
+	stockData := getStockDataWithFallback(symbol)
+	return stockData.Price, nil
+}
+
+func generatePriceChange() (float64, error) {
+	return generateMockPriceChange()
+}
+
+func generatePriceChangePercent() (float64, error) {
+	return generateMockPriceChangePercent()
+}
+
+func splitSymbols(symbols string) []string {
+	if symbols == "" {
+		return []string{}
+	}
+	
+	// Split by comma and trim spaces
+	parts := strings.Split(symbols, ",")
+	result := make([]string, 0, len(parts))
+	
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(strings.ToUpper(part)) // Convert to uppercase for consistency
+		if trimmed != "" && len(trimmed) <= 10 { // Basic validation
+			result = append(result, trimmed)
+		}
+	}
+	
+	return result
 } 

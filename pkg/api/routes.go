@@ -29,6 +29,12 @@ func SetupRoutes(router *gin.Engine, handlers *Handlers) {
 		// Health endpoints (alias to /health)
 		v1.GET("/health", handlers.Health)
 		
+		// Simple test endpoint using handler method
+		v1.GET("/test-handler", handlers.TestEndpoint)
+		
+		// Disruption risk endpoint
+		v1.GET("/disruption-risk", handlers.GetDisruptionRisk)
+		
 		// Prediction endpoints
 		predictions := v1.Group("/predictions")
 		{

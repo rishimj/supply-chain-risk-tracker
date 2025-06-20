@@ -51,7 +51,7 @@ services:
     image: redislabs/redisinsight:latest
     container_name: supply-chain-redis-insight
     ports:
-      - "8001:8001"
+      - "8002:8001"
     depends_on:
       - redis
 
@@ -119,19 +119,26 @@ services:
       dockerfile: python/Dockerfile
     container_name: supply-chain-model-server
     depends_on:
-      - postgres
-      - redis
-      - neo4j
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/supply_chain_ml
       - REDIS_URL=redis://redis:6379
-      - NEO4J_URL=bolt://neo4j:7687
     ports:
-      - "8001:8001"
+      - "8003:8001"
     volumes:
       - ./python:/app
       - model_artifacts:/app/models
     command: uvicorn inference.server:app --host 0.0.0.0 --port 8001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
 
   # API Server (Go)
   api-server:
@@ -140,13 +147,21 @@ services:
       dockerfile: cmd/api-server/Dockerfile
     container_name: supply-chain-api-server
     depends_on:
-      - postgres
-      - redis
-      - neo4j
-      - kafka
-      - model-server
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      model-server:
+        condition: service_healthy
     environment:
       - CONFIG_PATH=/app/configs/config.yaml
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/supply_chain_ml
+      - REDIS_URL=redis://redis:6379
+      # Stock API Configuration
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
+      - ENABLE_REAL_STOCK_DATA=${ENABLE_REAL_STOCK_DATA:-true}
     ports:
       - "8080:8080"
     volumes:
@@ -156,38 +171,46 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
+    restart: unless-stopped
 
-  # Data Pipeline (Go) - Available processor
+  # Data Pipeline (Go)
   data-pipeline:
     build:
       context: .
       dockerfile: cmd/data-pipeline/Dockerfile
     container_name: supply-chain-data-pipeline
     depends_on:
-      - postgres
-      - redis
-      - neo4j
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       - CONFIG_PATH=/app/configs/config.yaml
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/supply_chain_ml
+      - REDIS_URL=redis://redis:6379
     volumes:
       - ./configs:/app/configs
       - ./data:/app/data
+    restart: unless-stopped
 
   # Frontend (React)
   frontend:
     build:
-      context: ./web
+      context: ./disruption-ui
       dockerfile: Dockerfile
     container_name: supply-chain-frontend
     depends_on:
-      - api-server
+      api-server:
+        condition: service_healthy
     ports:
-      - "3000:3000"
+      - "3002:80" # Maps host port 3000 to container's nginx port 80
     environment:
-      - REACT_APP_API_URL=http://localhost:8080
+      - VITE_API_URL=http://localhost:3000 # API server URL for frontend to make API calls
     volumes:
-      - ./web:/app
+      - ./disruption-ui:/app
       - /app/node_modules
+    restart: unless-stopped
 
   # Prometheus Monitoring
   prometheus:
@@ -214,7 +237,7 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=ikWqB8PQ6B3.2kW
     volumes:
       - grafana_data:/var/lib/grafana
       - ./configs/grafana:/etc/grafana/provisioning

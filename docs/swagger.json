@@ -1,0 +1,257 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "API for supply chain risk prediction and management",
+        "title": "Supply Chain Risk Management API",
+        "termsOfService": "http://swagger.io/terms/",
+        "contact": {
+            "name": "API Support",
+            "url": "http://www.swagger.io/support",
+            "email": "support@swagger.io"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api/v1",
+    "paths": {
+        "/disruption-risk": {
+            "get": {
+                "description": "Get disruption risk data for one or more companies",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "disruption"
+                ],
+                "summary": "Get disruption risk",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Company symbol(s), comma-separated for multiple",
+                        "name": "symbol",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Disruption risk data",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Get the health status of the API",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "Health status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/predictions/predict": {
+            "post": {
+                "description": "Generate supply chain risk prediction for a company",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "predictions"
+                ],
+                "summary": "Predict company risk",
+                "parameters": [
+                    {
+                        "description": "Prediction request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.PredictRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Prediction result",
+                        "schema": {
+                            "$ref": "#/definitions/api.PredictResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "api.ComponentRisks": {
+            "type": "object",
+            "properties": {
+                "financial_risk": {
+                    "type": "number"
+                },
+                "network_risk": {
+                    "type": "number"
+                },
+                "sentiment_risk": {
+                    "type": "number"
+                },
+                "temporal_risk": {
+                    "type": "number"
+                }
+            }
+        },
+        "api.PredictOptions": {
+            "type": "object",
+            "properties": {
+                "include_component_risks": {
+                    "type": "boolean"
+                },
+                "include_feature_importance": {
+                    "type": "boolean"
+                },
+                "model_version": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.PredictRequest": {
+            "type": "object",
+            "required": [
+                "company_id",
+                "features"
+            ],
+            "properties": {
+                "company_id": {
+                    "type": "string"
+                },
+                "features": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                },
+                "options": {
+                    "$ref": "#/definitions/api.PredictOptions"
+                }
+            }
+        },
+        "api.PredictResponse": {
+            "type": "object",
+            "properties": {
+                "company_id": {
+                    "type": "string"
+                },
+                "component_risks": {
+                    "$ref": "#/definitions/api.ComponentRisks"
+                },
+                "confidence": {
+                    "type": "number"
+                },
+                "feature_importance": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                },
+                "guidance_miss_probability": {
+                    "type": "number"
+                },
+                "model_version": {
+                    "type": "string"
+                },
+                "prediction_id": {
+                    "type": "string"
+                },
+                "prediction_timestamp": {
+                    "type": "string"
+                },
+                "risk_factors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.RiskFactor"
+                    }
+                },
+                "risk_score": {
+                    "type": "number"
+                }
+            }
+        },
+        "api.RiskFactor": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "impact": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

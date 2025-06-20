@@ -1,0 +1,172 @@
+basePath: /api/v1
+definitions:
+  api.ComponentRisks:
+    properties:
+      financial_risk:
+        type: number
+      network_risk:
+        type: number
+      sentiment_risk:
+        type: number
+      temporal_risk:
+        type: number
+    type: object
+  api.PredictOptions:
+    properties:
+      include_component_risks:
+        type: boolean
+      include_feature_importance:
+        type: boolean
+      model_version:
+        type: string
+    type: object
+  api.PredictRequest:
+    properties:
+      company_id:
+        type: string
+      features:
+        additionalProperties:
+          type: number
+        type: object
+      options:
+        $ref: '#/definitions/api.PredictOptions'
+    required:
+    - company_id
+    - features
+    type: object
+  api.PredictResponse:
+    properties:
+      company_id:
+        type: string
+      component_risks:
+        $ref: '#/definitions/api.ComponentRisks'
+      confidence:
+        type: number
+      feature_importance:
+        additionalProperties:
+          type: number
+        type: object
+      guidance_miss_probability:
+        type: number
+      model_version:
+        type: string
+      prediction_id:
+        type: string
+      prediction_timestamp:
+        type: string
+      risk_factors:
+        items:
+          $ref: '#/definitions/api.RiskFactor'
+        type: array
+      risk_score:
+        type: number
+    type: object
+  api.RiskFactor:
+    properties:
+      category:
+        type: string
+      description:
+        type: string
+      impact:
+        type: number
+      name:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: API for supply chain risk prediction and management
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Supply Chain Risk Management API
+  version: "1.0"
+paths:
+  /disruption-risk:
+    get:
+      consumes:
+      - application/json
+      description: Get disruption risk data for one or more companies
+      parameters:
+      - description: Company symbol(s), comma-separated for multiple
+        in: query
+        name: symbol
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Disruption risk data
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get disruption risk
+      tags:
+      - disruption
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Get the health status of the API
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Health status
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health check
+      tags:
+      - health
+  /predictions/predict:
+    post:
+      consumes:
+      - application/json
+      description: Generate supply chain risk prediction for a company
+      parameters:
+      - description: Prediction request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.PredictRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Prediction result
+          schema:
+            $ref: '#/definitions/api.PredictResponse'
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Predict company risk
+      tags:
+      - predictions
+schemes:
+- http
+- https
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

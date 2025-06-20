@@ -94,7 +94,7 @@ docker-compose ps
 - **Dashboard**: http://localhost:3000
 - **API**: http://localhost:8080
 - **Model Server**: http://localhost:8001
-- **Grafana**: http://localhost:3001 (admin/admin)
+- **Grafana**: http://localhost:3001 (admin/ikWqB8PQ6B3.2kW)
 - **Neo4j Browser**: http://localhost:7474 (neo4j/password)
 
 ### 4. Test Prediction API

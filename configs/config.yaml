@@ -5,8 +5,8 @@ server:
 
 database:
   postgres:
-    host: "localhost"
-    port: 5433
+    host: "postgres"
+    port: 5432
     database: "supply_chain_ml"
     username: "postgres"
     password: "password"
@@ -14,21 +14,21 @@ database:
     max_connections: 20
 
   redis:
-    host: "localhost"
+    host: "redis"
     port: 6379
     password: ""
     db: 0
     max_connections: 10
 
   neo4j:
-    uri: "bolt://localhost:7687"
+    uri: "bolt://neo4j:7687"
     username: "neo4j"
     password: "password"
     max_connections: 10
 
 streaming:
   kafka:
-    brokers: ["localhost:9092"]
+    brokers: ["kafka:9092"]
     consumer_group: "supply-chain-processor"
     topics:
       sec_filings: "sec-filings"
@@ -43,17 +43,17 @@ streaming:
 features:
   cache_ttl: "24h"
   max_features: 1000
-  feature_store_endpoint: "http://localhost:6379"
+  feature_store_endpoint: "http://redis:6379"
 
 ml:
-  model_server_endpoint: "http://localhost:8001"
+  model_server_endpoint: "http://model-server:8001"
   model_version: "v1.0.0"
   prediction_cache_ttl: "1h"
   retrain_interval: "24h"
 
 monitoring:
   prometheus:
-    endpoint: "localhost:9090"
+    endpoint: "prometheus:9090"
     scrape_interval: "15s"
 
   logging:

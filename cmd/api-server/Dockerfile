@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
@@ -29,6 +29,9 @@ COPY --from=builder /app/api-server .
 
 # Copy config files
 COPY --from=builder /app/configs ./configs
+
+# Copy swagger docs
+COPY --from=builder /app/docs ./docs
 
 # Expose port
 EXPOSE 8080

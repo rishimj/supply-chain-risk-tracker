@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "supply-chain-ml/docs" // Import generated docs
 	"supply-chain-ml/pkg/api"
 	"supply-chain-ml/pkg/config"
 	"supply-chain-ml/pkg/database"
@@ -19,7 +20,29 @@ import (
 	"supply-chain-ml/pkg/monitoring"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
+
+// @title Supply Chain Risk Management API
+// @version 1.0
+// @description API for supply chain risk prediction and management
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.url http://www.swagger.io/support
+// @contact.email support@swagger.io
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:8080
+// @BasePath /api/v1
+// @schemes http https
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name Authorization
 
 func main() {
 	// Load configuration
@@ -61,6 +84,14 @@ func main() {
 	
 	// Setup routes using the existing route configuration
 	api.SetupRoutes(router, handlers)
+
+	// Add Swagger documentation route
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// Add a simple test route directly here
+	router.GET("/api/v1/test-direct", func(c *gin.Context) {
+		c.JSON(200, gin.H{"message": "direct route works"})
+	})
 
 	// Create HTTP server
 	server := &http.Server{
