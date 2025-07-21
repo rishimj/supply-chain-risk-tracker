@@ -206,7 +206,7 @@ npm run build
 1. **Ingestion**: Kafka consumers for market data, news
 2. **Processing**: Flink jobs for feature extraction
 3. **Storage**: Redis for features, PostgreSQL for persistence
-4. **Serving**: Sub-100ms feature retrieval
+
 
 ### Batch Pipeline
 
