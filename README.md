@@ -4,11 +4,7 @@ A sophisticated machine learning system that predicts the probability of public 
 
 ## 🎯 Project Overview
 
-This system combines real-time data ingestion, advanced machine learning, and network analysis to predict supply chain risks with:
-
-- **Sub-100ms prediction latency**
-- **70%+ accuracy**
-- **45 days advance warning**
+This system combines real-time data ingestion, advanced machine learning, and network analysis to predict supply chain risks.
 
 ### Key Prediction Target
 
@@ -49,7 +45,6 @@ The probability that a public company will miss quarterly earnings guidance by >
 ### Databases
 
 - **PostgreSQL**: Relational data (financial, earnings, features)
-- **Neo4j**: Graph data (supplier networks)
 - **Redis**: Caching and feature store
 
 ### Infrastructure
@@ -95,24 +90,7 @@ docker-compose ps
 - **API**: http://localhost:8080
 - **Model Server**: http://localhost:8001
 - **Grafana**: http://localhost:3001 (admin/ikWqB8PQ6B3.2kW)
-- **Neo4j Browser**: http://localhost:7474 (neo4j/password)
 
-### 4. Test Prediction API
-
-```bash
-curl -X POST http://localhost:8080/api/v1/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "company_id": "AAPL",
-    "features": {
-      "financial_revenue_growth": 0.15,
-      "financial_gross_margin": 0.35,
-      "network_supplier_concentration": 0.45,
-      "ts_volatility_30d": 0.25,
-      "nlp_sentiment_score": 0.65
-    }
-  }'
-```
 
 ## 📊 Data Sources
 
@@ -153,10 +131,7 @@ curl -X POST http://localhost:8080/api/v1/predict \
 
 ### Performance Metrics
 
-- **AUC**: 0.72+ on validation set
-- **Precision**: 0.68+ at 50% recall
-- **Latency**: <100ms for real-time predictions
-- **Coverage**: 3000+ public companies
+- **AUC**: 0.70+ on validation set
 
 ## 🏃‍♂️ Development
 
@@ -250,131 +225,8 @@ npm run build
 4. **Model Selection**: Performance-based selection
 5. **Deployment**: Automated model deployment
 
-### Retraining Schedule
-
-- **Daily**: Feature updates and drift detection
-- **Weekly**: Model retraining on new data
-- **Monthly**: Architecture improvements
-- **Quarterly**: Full pipeline optimization
-
-## 🔒 Security and Compliance
-
-### Data Security
-
-- **Encryption**: All data encrypted at rest and in transit
-- **Access Control**: Role-based access to sensitive data
-- **Audit Logging**: Complete audit trail for all operations
-- **Data Retention**: Automated data lifecycle management
-
-### Compliance
-
-- **GDPR**: Data privacy and right to be forgotten
-- **SOX**: Financial data accuracy and controls
-- **SEC**: Regulatory compliance for financial predictions
-
-## 📚 API Documentation
-
-### Core Endpoints
-
-#### Predict Risk
-
-```
-POST /api/v1/predict
-```
-
-Generate supply chain risk prediction for a company.
-
-#### Get Company Risk
-
-```
-GET /api/v1/companies/{id}/risk
-```
-
-Retrieve latest risk assessment for a company.
-
-#### Batch Predictions
-
-```
-POST /api/v1/predict/batch
-```
-
-Process multiple companies in a single request.
-
-### Response Format
-
-```json
-{
-  "guidance_miss_probability": 0.72,
-  "risk_score": 72.0,
-  "confidence": 0.85,
-  "component_risks": {
-    "financial_risk": 0.65,
-    "network_risk": 0.78,
-    "temporal_risk": 0.71,
-    "sentiment_risk": 0.69
-  },
-  "feature_importance": {
-    "financial_inventory_turnover": 0.15,
-    "network_supplier_concentration": 0.12,
-    "nlp_earnings_sentiment": 0.08
-  },
-  "model_version": "v1.2.3"
-}
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Development Guidelines
-
-- Follow Go and Python style guidelines
-- Write comprehensive tests
-- Update documentation
-- Ensure all CI checks pass
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙋‍♂️ Support
-
-For questions and support:
-
-- Create an issue on GitHub
-- Check the documentation
-- Review the API examples
-
-## 🛣️ Roadmap
-
-### Q1 2024
-
-- [ ] Enhanced GNN models for supply chain networks
-- [ ] Real-time news sentiment integration
-- [ ] Advanced feature engineering pipeline
-
-### Q2 2024
-
-- [ ] Multi-horizon predictions (30, 60, 90 days)
-- [ ] Sector-specific models
-- [ ] Causal inference framework
-
-### Q3 2024
-
-- [ ] ESG risk factors integration
-- [ ] Geopolitical risk modeling
-- [ ] Automated model explanation
-
-### Q4 2024
-
-- [ ] Multi-language support
-- [ ] Mobile application
-- [ ] Enterprise deployment tools
-
----
-
-**Built with ❤️ for supply chain risk management**

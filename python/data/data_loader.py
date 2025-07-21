@@ -45,15 +45,20 @@ class DataLoader:
             companies_data, financial_data, market_data, news_data, supplier_data
         )
         
-        logger.info(f"Loaded {len(training_data)} training samples")
-        return training_data
+        # Clean and preprocess
+        clean_data = self._clean_merged_data(training_data)
+        
+        logger.info(f"Loaded {len(clean_data)} training samples")
+        return clean_data
+    
+
     
     def _load_companies_data(self, start_date: str, end_date: str) -> pd.DataFrame:
         """Load basic company information"""
         query = """
         SELECT 
             c.id as company_id,
-            c.symbol,
+            c.ticker as symbol,
             c.name,
             c.sector,
             c.industry,
@@ -63,19 +68,19 @@ class DataLoader:
             c.headquarters_country,
             c.created_at,
             c.updated_at
-        FROM companies c
+        FROM company_info c
         WHERE c.created_at BETWEEN %s AND %s
-        ORDER BY c.symbol
+        ORDER BY c.ticker
         """
         
-        return pd.read_sql(query, self.engine, params=[start_date, end_date])
+        return pd.read_sql(query, self.engine, params=(start_date, end_date))
     
     def _load_financial_data(self, start_date: str, end_date: str) -> pd.DataFrame:
         """Load financial metrics data"""
         query = """
         SELECT 
             fd.company_id,
-            fd.report_date,
+            fd.filing_date as report_date,
             fd.revenue,
             fd.gross_profit,
             fd.operating_income,
@@ -83,19 +88,15 @@ class DataLoader:
             fd.total_assets,
             fd.total_liabilities,
             fd.shareholders_equity,
-            fd.cash_and_equivalents,
-            fd.inventory,
-            fd.accounts_receivable,
-            fd.accounts_payable,
             fd.current_assets,
+            fd.inventory,
             fd.current_liabilities,
-            fd.long_term_debt,
             
             -- Calculate financial ratios
             CASE WHEN fd.total_assets > 0 THEN fd.net_income / fd.total_assets ELSE 0 END as roa,
             CASE WHEN fd.shareholders_equity > 0 THEN fd.net_income / fd.shareholders_equity ELSE 0 END as roe,
             CASE WHEN fd.current_liabilities > 0 THEN fd.current_assets / fd.current_liabilities ELSE 0 END as current_ratio,
-            CASE WHEN fd.total_liabilities > 0 THEN fd.total_liabilities / fd.shareholders_equity ELSE 0 END as debt_to_equity,
+            CASE WHEN fd.shareholders_equity > 0 THEN fd.total_liabilities / fd.shareholders_equity ELSE 0 END as debt_to_equity,
             CASE WHEN fd.revenue > 0 THEN fd.gross_profit / fd.revenue ELSE 0 END as gross_margin,
             CASE WHEN fd.inventory > 0 AND fd.revenue > 0 THEN fd.revenue / fd.inventory ELSE 0 END as inventory_turnover,
             CASE WHEN (fd.current_assets - fd.inventory) > 0 AND fd.current_liabilities > 0 
@@ -103,11 +104,11 @@ class DataLoader:
             CASE WHEN fd.total_assets > 0 THEN fd.revenue / fd.total_assets ELSE 0 END as asset_turnover
             
         FROM financial_data fd
-        WHERE fd.report_date BETWEEN %s AND %s
-        ORDER BY fd.company_id, fd.report_date
+        WHERE fd.filing_date BETWEEN %s AND %s
+        ORDER BY fd.company_id, fd.filing_date
         """
         
-        return pd.read_sql(query, self.engine, params=[start_date, end_date])
+        return pd.read_sql(query, self.engine, params=(start_date, end_date))
     
     def _load_market_data(self, start_date: str, end_date: str) -> pd.DataFrame:
         """Load market data and calculate technical indicators"""
@@ -128,7 +129,7 @@ class DataLoader:
                      THEN (md.close_price - LAG(md.close_price) OVER (PARTITION BY md.company_id ORDER BY md.date)) 
                           / LAG(md.close_price) OVER (PARTITION BY md.company_id ORDER BY md.date)
                      ELSE 0 END as daily_return
-            FROM market_data_daily md
+            FROM market_data md
             WHERE md.date BETWEEN %s AND %s
         ),
         volatility_metrics AS (
@@ -189,7 +190,7 @@ class DataLoader:
         ORDER BY company_id, date
         """
         
-        return pd.read_sql(query, self.engine, params=[start_date, end_date])
+        return pd.read_sql(query, self.engine, params=(start_date, end_date))
     
     def _load_news_data(self, start_date: str, end_date: str) -> pd.DataFrame:
         """Load news sentiment data"""
@@ -197,15 +198,15 @@ class DataLoader:
         WITH daily_sentiment AS (
             SELECT 
                 na.company_id,
-                DATE(na.published_at) as date,
+                DATE(na.published_date) as date,
                 AVG(na.sentiment_score) as avg_sentiment,
                 COUNT(*) as news_count,
                 SUM(CASE WHEN na.sentiment_score > 0.6 THEN 1 ELSE 0 END) as positive_news,
                 SUM(CASE WHEN na.sentiment_score < 0.4 THEN 1 ELSE 0 END) as negative_news,
-                SUM(na.risk_keywords_count) as total_risk_keywords
+                SUM(COALESCE(na.supply_chain_mentions, 0)) as total_risk_keywords
             FROM news_articles na
-            WHERE DATE(na.published_at) BETWEEN %s AND %s
-            GROUP BY na.company_id, DATE(na.published_at)
+            WHERE DATE(na.published_date) BETWEEN %s AND %s
+            GROUP BY na.company_id, DATE(na.published_date)
         )
         SELECT 
             company_id,
@@ -219,35 +220,35 @@ class DataLoader:
         ORDER BY company_id, date
         """
         
-        return pd.read_sql(query, self.engine, params=[start_date, end_date])
+        return pd.read_sql(query, self.engine, params=(start_date, end_date))
     
     def _load_supplier_network_data(self, start_date: str, end_date: str) -> pd.DataFrame:
         """Load supplier network and relationship data"""
         query = """
         WITH supplier_metrics AS (
             SELECT 
-                sr.customer_company_id as company_id,
-                COUNT(DISTINCT sr.supplier_company_id) as total_suppliers,
-                AVG(sr.relationship_strength) as avg_relationship_strength,
-                MAX(sr.relationship_strength) as max_supplier_dependency,
+                sr.company_id,
+                COUNT(DISTINCT sr.supplier_id) as total_suppliers,
+                AVG(COALESCE(sr.criticality_score, 0.5)) as avg_relationship_strength,
+                MAX(COALESCE(sr.criticality_score, 0.5)) as max_supplier_dependency,
                 
                 -- Supplier concentration (Herfindahl index)
-                SUM(POWER(sr.relationship_strength, 2)) as supplier_concentration_index,
+                SUM(POWER(COALESCE(sr.spend_percentage, 0.1), 2)) as supplier_concentration_index,
                 
                 -- Geographic diversity
-                COUNT(DISTINCT sc.headquarters_country) as supplier_countries,
+                COUNT(DISTINCT sc.country) as supplier_countries,
                 
                 -- Risk metrics
-                AVG(COALESCE(sr.risk_score, 0.5)) as avg_supplier_risk,
-                MAX(COALESCE(sr.risk_score, 0.5)) as max_supplier_risk,
+                AVG(COALESCE((sr.geographic_risk_score + sr.financial_risk_score + sr.operational_risk_score)/3, 0.5)) as avg_supplier_risk,
+                MAX(COALESCE((sr.geographic_risk_score + sr.financial_risk_score + sr.operational_risk_score)/3, 0.5)) as max_supplier_risk,
                 
-                -- Critical suppliers
-                SUM(CASE WHEN sr.is_critical = true THEN 1 ELSE 0 END) as critical_suppliers_count
+                -- Critical suppliers (assuming tier 1 are critical)
+                SUM(CASE WHEN sr.tier = 1 THEN 1 ELSE 0 END) as critical_suppliers_count
                 
             FROM supplier_relationships sr
-            LEFT JOIN companies sc ON sr.supplier_company_id = sc.id
+            LEFT JOIN supplier_companies sc ON sr.supplier_id = sc.id
             WHERE sr.created_at BETWEEN %s AND %s
-            GROUP BY sr.customer_company_id
+            GROUP BY sr.company_id
         )
         SELECT 
             company_id,
@@ -273,7 +274,7 @@ class DataLoader:
         ORDER BY company_id
         """
         
-        return pd.read_sql(query, self.engine, params=[start_date, end_date])
+        return pd.read_sql(query, self.engine, params=(start_date, end_date))
     
     def _merge_data_sources(self, companies_data: pd.DataFrame, financial_data: pd.DataFrame, 
                            market_data: pd.DataFrame, news_data: pd.DataFrame, 
